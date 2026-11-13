@@ -53,10 +53,11 @@ label.tg input { width:20px; height:20px; }
 <div class="bar">
   <button id="bMenu" title="Photos, load and export">&#9776; Photos</button>
   <div class="grp">
-    <button data-cls="50"><span class="sw" style="background:rgb(230,159,0)"></span>Head</button>
     <button data-cls="100"><span class="sw" style="background:rgb(86,180,233)"></span>Body</button>
     <button data-cls="150"><span class="sw" style="background:rgb(0,158,115)"></span>Stripe</button>
     <button data-cls="200"><span class="sw" style="background:rgb(204,121,167)"></span>Blotch</button>
+    <button data-cls="25"><span class="sw" style="background:rgb(213,94,0)"></span>Eye</button>
+    <button data-cls="75"><span class="sw" style="background:rgb(240,228,66)"></span>Glare</button>
     <button data-cls="0"><span class="sw" style="background:#222;border:1px solid #999"></span>Not snake</button>
     <button data-cls="1">Model's guess</button>
   </div>
@@ -75,13 +76,14 @@ label.tg input { width:20px; height:20px; }
   <div class="grp">
     <span class="small">Replace all</span>
     <select id="selFrom" class="b"><option value="200">blotch</option><option value="150">stripe</option><option value="100">body</option>
-      <option value="50">head</option><option value="0">not snake</option></select>
+      <option value="75">glare</option><option value="25">eye</option><option value="0">not snake</option></select>
     <button id="bReplace">with selected paint</button>
   </div>
 </div>
 <div class="bar">
   <span id="title">No photos yet: tap &#9776; Photos &gt; Load batch</span>
   <label class="tg"><input type="checkbox" id="chkInside" checked> inside outline only</label>
+  <label class="tg" style="color:#ffcc80"><input type="checkbox" id="chkKinked"> kinked</label>
   <label class="tg"><input type="checkbox" id="chkOutline" checked> outline</label>
   <label class="tg">colors <input type="range" id="op" min="0" max="0.9" step="0.05" value="0.45"></label>
   <div class="grp">
@@ -117,11 +119,13 @@ label.tg input { width:20px; height:20px; }
     <b>Pencil</b> draws: Polygon = tap the corners, then tap the first corner, double-tap, or "Close shape".
     Lasso = draw around an area. <b>Replace all</b>: every pixel of one region (e.g. all blotch) becomes the selected paint.
     Brush = paint; &minus; / + size; Straight = straight lines (a tap draws straight on from the last stroke).
-    <b>Fingers</b>: one finger moves the photo, two fingers pinch to zoom. "Inside outline only": head / body / stripe /
+    <b>Fingers</b>: one finger moves the photo, two fingers pinch to zoom and twist to rotate (it snaps upright when close; Fit straightens it). "Inside outline only": head / body / stripe /
     blotch only land inside the white outline, so you can go roughly around the snake's outside edge.
+    <b>Kinked</b> marks the whole photo (saved at once, exported with your edits).
     Your work is saved on this iPad as you go ("in progress"). <b>Fixed</b> = done, next photo. <b>Looks right</b> = nothing to fix.
     <b>Export edits</b> sends everything you did to the Mac (AirDrop), where <code>import_ipad_edits()</code> reads it.
-    With a keyboard: 1-4 head / body / stripe / blotch, E not snake, 6 model's guess, P / L / B tools, [ ] brush size, Z undo,
+    <b>Eye</b> and <b>Glare</b> (shiny highlights on the scales) are left out of all colors; the head counts as body.
+    With a keyboard: 1 eye, 2-4 body / stripe / blotch, 5 glare, E not snake, 6 model's guess, P / L / B tools, [ ] brush size, Z undo,
     Shift = straight brush line, Enter closes a polygon, S fixed, G looks right, K skip, arrows previous / next.
     <br><span id="ver"></span>
   </div>
@@ -129,9 +133,11 @@ label.tg input { width:20px; height:20px; }
 
 <script>
 'use strict';
-const APP_VERSION = 'region editor (iPad) 1.1';
-const COL = {50:[230,159,0], 100:[86,180,233], 150:[0,158,115], 200:[204,121,167]};
-const NAMES = {50:'head',100:'body',150:'stripe',200:'blotch',0:'not snake'};
+const APP_VERSION = 'region editor (iPad) 1.4';
+// region codes in the saved maps: 0 not snake, 25 eye, 75 glare, 100 body, 150 stripe, 200 blotch
+// (head, 50, is no longer used: since v5 the head counts as body, so old head paint shows as body)
+const COL = {25:[213,94,0], 75:[240,228,66], 100:[86,180,233], 150:[0,158,115], 200:[204,121,167]};
+const NAMES = {25:'eye', 75:'glare', 100:'body', 150:'stripe', 200:'blotch', 0:'not snake'};
 const BRUSH_SIZES = [0.5, 1, 1.5, 2, 3, 4, 5, 6, 8, 10, 13, 17, 22, 28, 36, 46, 60, 80, 100, 130, 150];
 const $ = id => document.getElementById(id);
 
@@ -164,7 +170,7 @@ let PHOTOS = [], EDITS = {}, cur = -1;   // PHOTOS: metadata (no images), sorted
 let S = null;                             // the open photo
 let tool = 'polygon', cls = 150, brush = 8, opacity = 0.45, insideOnly = true, showOutline = true, hidden = false;
 let straight = false, fingerDraw = false;
-let view = {s:1, ox:0, oy:0}, dpr = window.devicePixelRatio || 1;
+let view = {s:1, ox:0, oy:0, r:0}, dpr = window.devicePixelRatio || 1;
 let poly = [], lasso = null, stroke = null, hover = null, lastPt = null, shiftDown = false, lastTap = null;
 let drawPointer = null, drawType = null, drawClient = null;   // the pen / finger / mouse that is drawing
 const touches = new Map(); let gesture = null; let panMouse = null; let spaceDown = false;
@@ -184,7 +190,7 @@ async function loadBatchFile(file){
   for (const p of doc.photos) {
     if (have.has(p.key)) { kept++; continue; }       // already here (your work on it is kept)
     await dbPut('photos', {key:p.key, order:order++, batch_id:doc.batch_id, observation_id:p.observation_id, photo_id:p.photo_id,
-      photo_url:p.photo_url, source:p.source, uncertainty:p.uncertainty, worst_dE:p.worst_dE, status0:p.status,
+      photo_url:p.photo_url, source:p.source, uncertainty:p.uncertainty, worst_dE:p.worst_dE, status0:p.status, kinked:!!p.kinked,
       img:dataURLtoBlob(p.img), pred:dataURLtoBlob(p.pred), outline:dataURLtoBlob(p.outline),
       edit0:dataURLtoBlob(p.edit), touched0:dataURLtoBlob(p.touched)});
     added++;
@@ -199,7 +205,8 @@ async function loadBatchFile(file){
 async function refreshList(){
   const ps = await dbAll('photos');
   PHOTOS = ps.map(p => ({key:p.key, order:p.order, batch_id:p.batch_id, observation_id:p.observation_id, photo_id:p.photo_id,
-    source:p.source, uncertainty:p.uncertainty, status0:p.status0})).sort((a, b) => a.order - b.order);
+    source:p.source, uncertainty:p.uncertainty, status0:p.status0, kinked:!!p.kinked, flagged_at:p.flagged_at || null,
+    flag_exported_at:p.flag_exported_at || null})).sort((a, b) => a.order - b.order);
   EDITS = {}; for (const e of await dbAll('edits')) EDITS[e.key] = {status:e.status, saved_at:e.saved_at, n_touched:e.n_touched, exported_at:e.exported_at};
   renderList(); renderBatchInfo();
 }
@@ -214,7 +221,7 @@ function renderList(){
     if (!['todo', 'all'].includes(f) && st !== f) return;
     const d = document.createElement('div'); d.className = 'item' + (i === cur ? ' cur' : '');
     d.innerHTML = '<span class="dot" style="background:' + DOT[st] + '"></span><span style="flex:1">' + p.key +
-      '<br><span class="small">' + st.replace('_', ' ') + ' &middot; ' + (p.source || '') + (p.uncertainty != null ? ' &middot; unsure ' + p.uncertainty : '') + '</span></span>';
+      '<br><span class="small">' + st.replace('_', ' ') + ' &middot; ' + (p.source || '') + (p.uncertainty != null ? ' &middot; unsure ' + p.uncertainty : '') + (p.kinked ? ' &middot; <b style="color:#ffcc80">kinked</b>' : '') + '</span></span>';
     d.onclick = () => { openPhoto(i); closeDrawer(); };
     L.appendChild(d);
   });
@@ -222,7 +229,8 @@ function renderList(){
 }
 async function renderBatchInfo(){
   const n = c => PHOTOS.filter(p => statusOf(p) === c).length;
-  const notExp = Object.values(EDITS).filter(e => e.status !== 'to do' && (!e.exported_at || e.exported_at < e.saved_at)).length;
+  const notExp = Object.values(EDITS).filter(e => e.status !== 'to do' && (!e.exported_at || e.exported_at < e.saved_at)).length +
+    PHOTOS.filter(p => p.flagged_at && (!p.flag_exported_at || p.flag_exported_at < p.flagged_at) && !(EDITS[p.key] && (!EDITS[p.key].exported_at || EDITS[p.key].exported_at < EDITS[p.key].saved_at))).length;
   $('batchInfo').innerHTML = PHOTOS.length ? (PHOTOS.length + ' photos: ' + n('to do') + ' to do, ' + n('in_progress') + ' in progress, ' + n('fixed') +
     ' fixed, ' + n('looks_right') + ' looks right, ' + n('skipped') + ' skipped.<br>' +
     (notExp ? '<b style="color:#ffb74d">' + notExp + ' edited photo(s) not exported yet.</b>' : 'Everything is exported.')) : '';
@@ -234,7 +242,7 @@ function loadImg(blob){ return new Promise((res, rej) => { if (!blob) { res(null
 function grayOf(im, W, H){ const c = document.createElement('canvas'); c.width = W; c.height = H; const x = c.getContext('2d', {willReadFrequently:true});
   x.imageSmoothingEnabled = false; x.drawImage(im, 0, 0, W, H); const d = x.getImageData(0, 0, W, H).data; const out = new Uint8Array(W * H);
   for (let i = 0; i < W * H; i++) out[i] = d[4 * i]; return out; }
-function snapCode(v){ let c = Math.round(v / 50) * 50; if (c > 200) c = 0; return c; }
+function snapCode(v){ let c = Math.round(v / 25) * 25; if (c === 50) c = 100; return (c in NAMES) ? c : 0; }
 
 async function openPhoto(i){
   if (i < 0 || i >= PHOTOS.length) return;
@@ -253,6 +261,7 @@ async function openPhoto(i){
     for (let y = 1; y < H - 1; y++) for (let x = 1; x < W - 1; x++) { const k = y * W + x;
       if (outline[k] && (!outline[k - 1] || !outline[k + 1] || !outline[k - W] || !outline[k + W])) edge[k] = 1; }
     S = {key:meta.key, meta, im, W, H, pred, outline, labels, touched, edge, undo:[], dirty:false, status:statusOf(meta)};
+    $('chkKinked').checked = !!meta.kinked;
     ov = document.createElement('canvas'); ov.width = W; ov.height = H; ovctx = ov.getContext('2d');
     cur = i; poly = []; lasso = null; stroke = null; lastPt = null;
     rebuild(); fit(); updateTitle(); renderList(); $('msg').style.display = 'none'; updateCloseBtn();
@@ -277,16 +286,26 @@ function rebuild(){
   ovctx.putImageData(img, 0, 0); draw();
 }
 function fit(){ if (!S) return; const w = stage.clientWidth, h = stage.clientHeight;
-  view.s = Math.min(w / S.W, h / S.H); view.ox = (w - S.W * view.s) / 2; view.oy = (h - S.H * view.s) / 2; draw(); }
+  view.r = 0; view.s = Math.min(w / S.W, h / S.H); view.ox = (w - S.W * view.s) / 2; view.oy = (h - S.H * view.s) / 2; draw(); }
 function toImg(e){ const r = cv.getBoundingClientRect(); const sx = e.clientX - r.left, sy = e.clientY - r.top;
-  return {x:(sx - view.ox) / view.s, y:(sy - view.oy) / view.s, sx, sy}; }
+  const q = screenToImg(sx, sy); return {x:q.x, y:q.y, sx, sy}; }
+// screen = o + s * R(r) * photo ;  photo = R(-r) * (screen - o) / s
+function screenToImg(sx, sy, v){ v = v || view; const dx = (sx - v.ox) / v.s, dy = (sy - v.oy) / v.s, c = Math.cos(v.r), n = Math.sin(v.r);
+  return {x: c * dx + n * dy, y: -n * dx + c * dy}; }
+function placeAt(q, sx, sy){ const c = Math.cos(view.r), n = Math.sin(view.r);   // put photo point q under screen point (sx, sy)
+  view.ox = sx - view.s * (c * q.x - n * q.y); view.oy = sy - view.s * (n * q.x + c * q.y); }
+function snapRotation(){                         // within 4 degrees of upright / sideways: snap to it
+  const q90 = Math.PI / 2, k = Math.round(view.r / q90), d = view.r - k * q90;
+  if (Math.abs(d) < 4 * Math.PI / 180 && d !== 0) { const w = stage.clientWidth / 2, h = stage.clientHeight / 2; const q = screenToImg(w, h);
+    view.r = k * q90; placeAt(q, w, h); draw(); } }
 function draw(){
   const w = stage.clientWidth, h = stage.clientHeight;
   if (cv.width !== Math.round(w * dpr) || cv.height !== Math.round(h * dpr)) { cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr); cv.style.width = w + 'px'; cv.style.height = h + 'px'; }
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.fillStyle = '#111'; ctx.fillRect(0, 0, w, h);
   if (!S) return;
   ctx.imageSmoothingEnabled = view.s < 2;
-  ctx.setTransform(dpr * view.s, 0, 0, dpr * view.s, dpr * view.ox, dpr * view.oy);
+  const vc = Math.cos(view.r) * view.s, vn = Math.sin(view.r) * view.s;
+  ctx.setTransform(dpr * vc, dpr * vn, -dpr * vn, dpr * vc, dpr * view.ox, dpr * view.oy);
   ctx.drawImage(S.im, 0, 0); if (!hidden) ctx.drawImage(ov, 0, 0);
   const col = cls >= 50 ? 'rgb(' + COL[cls].join(',') + ')' : (cls === 0 ? '#ff4444' : '#ffffff');
   ctx.lineWidth = 2 / view.s;
@@ -397,13 +416,15 @@ async function exportEdits(){
   await flushSave();
   const all = await dbAll('edits');
   const list = all.filter(e => e.status && e.status !== 'to do');
-  if (!list.length) { msg('Nothing to export yet.', 2500); return; }
+  const flagged = (await dbAll('photos')).filter(p => p.flagged_at);       // "kinked" ticked or unticked here
+  if (!list.length && !flagged.length) { msg('Nothing to export yet.', 2500); return; }
   msg('Preparing ' + list.length + ' edits ...');
   const out = [];
   for (const e of list) out.push({key:e.key, batch_id:e.batch_id, observation_id:e.observation_id, photo_id:e.photo_id, status:e.status,
     saved_at:e.saved_at, n_touched:e.n_touched, classes:e.classes, label:await blobToDataURL(e.label), touched:await blobToDataURL(e.touched)});
   const stamp = new Date().toISOString().replace(/[:T]/g, '-').slice(0, 16);
-  const doc = {format:'region-editor-edits', version:1, exported_at:new Date().toISOString(), app_version:APP_VERSION, edits:out};
+  const doc = {format:'region-editor-edits', version:1, exported_at:new Date().toISOString(), app_version:APP_VERSION, edits:out,
+    flags:flagged.map(p => ({key:p.key, observation_id:p.observation_id, photo_id:p.photo_id, kinked:!!p.kinked, flagged_at:p.flagged_at}))};
   const file = new File([JSON.stringify(doc)], 'region_edits_' + stamp + '.json', {type:'application/json'});
   let ok = false;
   try {
@@ -413,12 +434,15 @@ async function exportEdits(){
     setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 4000); ok = true; }
   const now = new Date().toISOString();
   for (const e of list) { e.exported_at = now; await dbPut('edits', e); }
+  for (const p of flagged) { p.flag_exported_at = now; await dbPut('photos', p); }
   await refreshList();
-  msg('Exported ' + list.length + ' edits as ' + file.name + '. On the Mac: import_ipad_edits().', 6000);
+  msg('Exported ' + list.length + ' edits' + (flagged.length ? ' and ' + flagged.length + ' kinked marks' : '') + ' as ' + file.name + '. On the Mac: import_ipad_edits().', 6000);
 }
 async function cleanExported(){
   const all = await dbAll('edits');
-  const done = all.filter(e => ['fixed', 'looks_right', 'skipped'].includes(e.status) && e.exported_at && e.exported_at >= e.saved_at).map(e => e.key);
+  const flagPending = new Set(PHOTOS.filter(p => p.flagged_at && (!p.flag_exported_at || p.flag_exported_at < p.flagged_at)).map(p => p.key));
+  const done = all.filter(e => ['fixed', 'looks_right', 'skipped'].includes(e.status) && e.exported_at && e.exported_at >= e.saved_at
+    && !flagPending.has(e.key)).map(e => e.key);
   if (!done.length) { msg('No finished photos have been exported yet.', 3000); return; }
   if (!confirm('Remove ' + done.length + ' finished, exported photos from this iPad? (Photos still to do or in progress stay.)')) return;
   for (const k of done) { await dbDel('photos', k); await dbDel('edits', k); }
@@ -480,7 +504,7 @@ function initInput(){
   });
   const up = e => {
     if (e.pointerId === drawPointer) { if (e.type === 'pointercancel') cancelDraw(); else endDraw(e); return; }
-    if (touches.has(e.pointerId)) { touches.delete(e.pointerId); startGesture(); return; }
+    if (touches.has(e.pointerId)) { const two = touches.size === 2; touches.delete(e.pointerId); if (two) snapRotation(); startGesture(); return; }
     panMouse = null;
   };
   cv.addEventListener('pointerup', up); cv.addEventListener('pointercancel', up);
@@ -489,7 +513,7 @@ function initInput(){
     if (!S) return; e.preventDefault(); const p = toImg(e);
     if (e.shiftKey && !e.ctrlKey) { view.ox -= e.deltaX; view.oy -= e.deltaY; draw(); return; }
     const f = e.ctrlKey ? Math.exp(-e.deltaY * .01) : Math.exp(e.deltaY * .002);
-    const s2 = Math.min(40, Math.max(.05, view.s * f)); view.ox = p.sx - p.x * s2; view.oy = p.sy - p.y * s2; view.s = s2; draw();
+    view.s = Math.min(40, Math.max(.05, view.s * f)); placeAt({x:p.x, y:p.y}, p.sx, p.sy); draw();
   }, {passive:false});
   // Safari's own pinch-zoom of the page: off
   document.addEventListener('gesturestart', e => e.preventDefault());
@@ -503,7 +527,7 @@ function initInput(){
     if ((e.metaKey || e.ctrlKey) && k.toLowerCase() === 'z') { undo(); e.preventDefault(); return; }
     if ((e.metaKey || e.ctrlKey) && k.toLowerCase() === 's') { flushSave(); msg('Saved.', 1200); e.preventDefault(); return; }
     if (e.metaKey || e.ctrlKey) return;
-    const map = {'1':50, '2':100, '3':150, '4':200, 'e':0, 'E':0, '6':1};
+    const map = {'1':25, '2':100, '3':150, '4':200, '5':75, 'e':0, 'E':0, '6':1};
     if (k in map) { setCls(map[k]); return; }
     switch (k.toLowerCase()) {
       case 'p': setTool('polygon'); break; case 'l': setTool('lasso'); break; case 'b': setTool('brush'); break;
@@ -522,23 +546,25 @@ function initInput(){
   stage.addEventListener('keyup', e => { if (e.key === ' ') spaceDown = false; if (e.key === 'Shift') { shiftDown = false; draw(); }
     if (e.key.toLowerCase() === 'h') { hidden = false; draw(); } });
 }
-// one finger moves the photo, two fingers pinch-zoom (and move)
+// one finger moves the photo, two fingers pinch-zoom, rotate and move
 function startGesture(){
   const pts = [...touches.values()];
   if (!pts.length) { gesture = null; return; }
   const r = cv.getBoundingClientRect();
   const mid = pts.length > 1 ? {x:(pts[0].x + pts[1].x) / 2 - r.left, y:(pts[0].y + pts[1].y) / 2 - r.top} : {x:pts[0].x - r.left, y:pts[0].y - r.top};
-  gesture = {n:pts.length, mid, dist:pts.length > 1 ? Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y) : 0, s:view.s, ox:view.ox, oy:view.oy};
+  gesture = {n:pts.length, mid, dist:pts.length > 1 ? Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y) : 0,
+    ang:pts.length > 1 ? Math.atan2(pts[1].y - pts[0].y, pts[1].x - pts[0].x) : 0, s:view.s, r:view.r, q:screenToImg(mid.x, mid.y)};
 }
 function moveGesture(){
   const pts = [...touches.values()]; if (!gesture || !pts.length) return;
   if (pts.length !== gesture.n) { startGesture(); return; }
   const r = cv.getBoundingClientRect(), g = gesture;
   const mid = pts.length > 1 ? {x:(pts[0].x + pts[1].x) / 2 - r.left, y:(pts[0].y + pts[1].y) / 2 - r.top} : {x:pts[0].x - r.left, y:pts[0].y - r.top};
-  let s = g.s;
-  if (pts.length > 1 && g.dist > 0) s = Math.min(40, Math.max(.05, g.s * Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y) / g.dist));
-  const ix = (g.mid.x - g.ox) / g.s, iy = (g.mid.y - g.oy) / g.s;     // the photo point under the fingers at the start
-  view.s = s; view.ox = mid.x - ix * s; view.oy = mid.y - iy * s; draw();
+  let s = g.s, rot = g.r;
+  if (pts.length > 1 && g.dist > 0) {                                // two fingers: zoom and rotate
+    s = Math.min(40, Math.max(.05, g.s * Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y) / g.dist));
+    rot = g.r + Math.atan2(pts[1].y - pts[0].y, pts[1].x - pts[0].x) - g.ang; }
+  view.s = s; view.r = rot; placeAt(g.q, mid.x, mid.y); draw();     // the photo point under the fingers stays under them
 }
 
 // ---------------------------------------------------------------- toolbar
@@ -565,6 +591,11 @@ async function main(){
   for (const ev of ['pointerup', 'pointercancel', 'pointerleave']) $('bHide').addEventListener(ev, () => hide(false));
   $('chkInside').onchange = e => insideOnly = e.target.checked;
   $('chkOutline').onchange = e => { showOutline = e.target.checked; rebuild(); };
+  $('chkKinked').onchange = async e => {                 // a mark on the whole photo, saved at once
+    if (!S) { e.target.checked = false; return; }
+    const p = await dbGet('photos', S.key); p.kinked = e.target.checked; p.flagged_at = new Date().toISOString(); await dbPut('photos', p);
+    S.meta.kinked = p.kinked; S.meta.flagged_at = p.flagged_at; renderList(); renderBatchInfo();
+    msg(p.kinked ? 'Marked kinked.' : 'Kinked mark removed.', 1500); };
   $('op').oninput = e => { opacity = +e.target.value; rebuild(); };
   $('chkFinger').onchange = e => { fingerDraw = e.target.checked; try { localStorage.setItem('fingerDraw', fingerDraw ? '1' : ''); } catch(_) {} };
   $('bPrev').onclick = () => next(-1); $('bNext').onclick = () => next(1);
