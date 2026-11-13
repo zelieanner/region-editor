@@ -1,0 +1,597 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Regions">
+<meta name="theme-color" content="#1e1f22">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<title>Region editor</title>
+<style>
+:root { --bg:#1e1f22; --panel:#26282c; --bar:#2d3035; --btn:#3a3d42; --line:#555; --text:#e6e6e6; --muted:#a8a8a8; }
+* { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+html, body { margin:0; height:100%; background:var(--bg); color:var(--text); font:15px -apple-system, Helvetica, Arial, sans-serif;
+  -webkit-user-select:none; user-select:none; -webkit-touch-callout:none; overscroll-behavior:none; }
+body { display:flex; flex-direction:column; padding-top:env(safe-area-inset-top); padding-bottom:env(safe-area-inset-bottom); }
+.bar { background:var(--bar); display:flex; flex-wrap:wrap; align-items:center; gap:6px; padding:6px 8px; }
+.grp { display:flex; align-items:center; gap:4px; margin-right:6px; }
+button, .b { min-height:40px; min-width:40px; padding:0 11px; border:1px solid var(--line); border-radius:8px; background:var(--btn);
+  color:var(--text); font:inherit; font-size:14px; cursor:pointer; touch-action:manipulation; }
+button.on { outline:3px solid #fff; outline-offset:-1px; }
+button:disabled { opacity:.4; }
+.sw { display:inline-block; width:13px; height:13px; border-radius:3px; margin-right:5px; vertical-align:-2px; }
+.save { background:#2e7d32; } .ok { background:#1565c0; } .skip { background:#5d4037; } .warn { background:#8a3a1a; }
+#title { font-size:13px; color:var(--muted); flex:1; min-width:120px; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
+#title b { color:var(--text); }
+#stage { flex:1; position:relative; min-height:200px; overflow:hidden; touch-action:none; outline:none; }
+#cv { position:absolute; left:0; top:0; touch-action:none; }
+#msg { position:absolute; left:12px; bottom:12px; max-width:80%; background:rgba(0,0,0,.8); padding:8px 12px; border-radius:8px; display:none; font-size:14px; }
+#closeShape { position:absolute; right:12px; bottom:12px; display:none; background:#2e7d32; }
+input[type=range] { width:110px; min-width:110px; }
+label.tg { display:flex; align-items:center; gap:5px; font-size:13px; color:var(--muted); padding:0 4px; }
+label.tg input { width:20px; height:20px; }
+#drawer { position:fixed; top:0; left:0; bottom:0; width:min(380px, 92vw); background:var(--panel); z-index:20; transform:translateX(-105%);
+  transition:transform .2s; display:flex; flex-direction:column; padding:calc(env(safe-area-inset-top) + 10px) 12px 12px; box-shadow:4px 0 20px rgba(0,0,0,.5); }
+#drawer.open { transform:none; }
+#drawer h3 { margin:4px 0 8px; }
+#drawer .row { display:flex; gap:6px; flex-wrap:wrap; margin-bottom:8px; }
+#list { flex:1; overflow-y:auto; -webkit-overflow-scrolling:touch; border-top:1px solid #3a3a3a; margin-top:6px; }
+.item { display:flex; align-items:center; gap:8px; padding:9px 4px; border-bottom:1px solid #333; font-size:14px; }
+.item.cur { background:#34373d; }
+.dot { width:12px; height:12px; border-radius:6px; flex:none; }
+.small { font-size:12px; color:var(--muted); line-height:1.45; }
+#scrim { position:fixed; inset:0; background:rgba(0,0,0,.35); z-index:19; display:none; }
+#help { white-space:normal; }
+.hidden { display:none !important; }
+</style>
+</head>
+<body>
+<div class="bar">
+  <button id="bMenu" title="Photos, load and export">&#9776; Photos</button>
+  <div class="grp">
+    <button data-cls="50"><span class="sw" style="background:rgb(230,159,0)"></span>Head</button>
+    <button data-cls="100"><span class="sw" style="background:rgb(86,180,233)"></span>Body</button>
+    <button data-cls="150"><span class="sw" style="background:rgb(0,158,115)"></span>Stripe</button>
+    <button data-cls="200"><span class="sw" style="background:rgb(204,121,167)"></span>Blotch</button>
+    <button data-cls="0"><span class="sw" style="background:#222;border:1px solid #999"></span>Not snake</button>
+    <button data-cls="1">Model's guess</button>
+  </div>
+  <div class="grp">
+    <button data-tool="polygon">Polygon</button>
+    <button data-tool="lasso">Lasso</button>
+    <button data-tool="brush">Brush</button>
+    <button id="bStraight" title="Brush: straight lines">&#8212; Straight</button>
+    <button id="bBrushMinus">&minus;</button><span id="brushv" style="min-width:26px;text-align:center">8</span><button id="bBrushPlus">+</button>
+  </div>
+  <div class="grp">
+    <button id="bUndo">&#8630; Undo</button>
+    <button id="bHide" title="Hold to see the bare photo">Hold: hide</button>
+    <button id="bFit">Fit</button>
+  </div>
+  <div class="grp">
+    <span class="small">Replace all</span>
+    <select id="selFrom" class="b"><option value="200">blotch</option><option value="150">stripe</option><option value="100">body</option>
+      <option value="50">head</option><option value="0">not snake</option></select>
+    <button id="bReplace">with selected paint</button>
+  </div>
+</div>
+<div class="bar">
+  <span id="title">No photos yet: tap &#9776; Photos &gt; Load batch</span>
+  <label class="tg"><input type="checkbox" id="chkInside" checked> inside outline only</label>
+  <label class="tg"><input type="checkbox" id="chkOutline" checked> outline</label>
+  <label class="tg">colors <input type="range" id="op" min="0" max="0.9" step="0.05" value="0.45"></label>
+  <div class="grp">
+    <button id="bPrev">&larr;</button>
+    <button id="bSkip" class="skip">Skip</button>
+    <button id="bOk" class="ok">Looks right</button>
+    <button id="bFixed" class="save">Fixed &#10003;</button>
+    <button id="bNext">&rarr;</button>
+  </div>
+</div>
+<div id="stage" tabindex="0"><canvas id="cv"></canvas><div id="msg"></div><button id="closeShape">Close shape</button></div>
+
+<div id="scrim"></div>
+<div id="drawer">
+  <h3>Region editor</h3>
+  <div class="row">
+    <button id="bLoad">Load batch</button>
+    <button id="bExport" class="save">Export edits</button>
+    <input type="file" id="fileIn" accept=".json,application/json" class="hidden">
+  </div>
+  <div class="small" id="batchInfo"></div>
+  <div class="row" style="margin-top:8px">
+    <select id="filter" class="b"><option value="todo">To do + in progress</option><option value="all">All</option>
+      <option value="fixed">Fixed</option><option value="looks_right">Looks right</option><option value="skipped">Skipped</option></select>
+    <label class="tg"><input type="checkbox" id="chkFinger"> draw with finger</label>
+  </div>
+  <div id="list"></div>
+  <div class="row" style="margin-top:8px">
+    <button id="bClean" class="warn">Remove exported photos</button>
+    <button id="bHelp">Help</button>
+  </div>
+  <div class="small" id="help" style="display:none">
+    <b>Pencil</b> draws: Polygon = tap the corners, then tap the first corner, double-tap, or "Close shape".
+    Lasso = draw around an area. <b>Replace all</b>: every pixel of one region (e.g. all blotch) becomes the selected paint.
+    Brush = paint; &minus; / + size; Straight = straight lines (a tap draws straight on from the last stroke).
+    <b>Fingers</b>: one finger moves the photo, two fingers pinch to zoom. "Inside outline only": head / body / stripe /
+    blotch only land inside the white outline, so you can go roughly around the snake's outside edge.
+    Your work is saved on this iPad as you go ("in progress"). <b>Fixed</b> = done, next photo. <b>Looks right</b> = nothing to fix.
+    <b>Export edits</b> sends everything you did to the Mac (AirDrop), where <code>import_ipad_edits()</code> reads it.
+    With a keyboard: 1-4 head / body / stripe / blotch, E not snake, 6 model's guess, P / L / B tools, [ ] brush size, Z undo,
+    Shift = straight brush line, Enter closes a polygon, S fixed, G looks right, K skip, arrows previous / next.
+    <br><span id="ver"></span>
+  </div>
+</div>
+
+<script>
+'use strict';
+const APP_VERSION = 'region editor (iPad) 1.1';
+const COL = {50:[230,159,0], 100:[86,180,233], 150:[0,158,115], 200:[204,121,167]};
+const NAMES = {50:'head',100:'body',150:'stripe',200:'blotch',0:'not snake'};
+const BRUSH_SIZES = [0.5, 1, 1.5, 2, 3, 4, 5, 6, 8, 10, 13, 17, 22, 28, 36, 46, 60, 80, 100, 130, 150];
+const $ = id => document.getElementById(id);
+
+// ---------------------------------------------------------------- storage (IndexedDB, on this iPad)
+let DB = null;
+function openDB(){ return new Promise((res, rej) => {
+  const r = indexedDB.open('region-editor', 1);
+  r.onupgradeneeded = () => { const d = r.result;
+    d.createObjectStore('photos', {keyPath:'key'}); d.createObjectStore('edits', {keyPath:'key'}); d.createObjectStore('meta', {keyPath:'k'}); };
+  r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); }); }
+function tx(store, mode, fn){ return new Promise((res, rej) => {
+  const t = DB.transaction(store, mode); const s = t.objectStore(store); let out; const r = fn(s); if (r) r.onsuccess = () => out = r.result;
+  t.oncomplete = () => res(out); t.onerror = () => rej(t.error); t.onabort = () => rej(t.error); }); }
+const dbGet = (s, k) => tx(s, 'readonly', st => st.get(k));
+const dbAll = s => tx(s, 'readonly', st => st.getAll());
+const dbPut = (s, v) => tx(s, 'readwrite', st => st.put(v));
+const dbDel = (s, k) => tx(s, 'readwrite', st => st.delete(k));
+
+function dataURLtoBlob(u){
+  if (!u) return null;
+  const i = u.indexOf(','); const head = u.slice(0, i); const bin = atob(u.slice(i + 1));
+  const a = new Uint8Array(bin.length); for (let k = 0; k < bin.length; k++) a[k] = bin.charCodeAt(k);
+  return new Blob([a], {type: (head.match(/data:([^;]+)/) || [,'application/octet-stream'])[1]});
+}
+function blobToDataURL(b){ return new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = () => rej(r.error); r.readAsDataURL(b); }); }
+function canvasBlob(c){ return new Promise(res => c.toBlob(res, 'image/png')); }
+
+// ---------------------------------------------------------------- state
+let PHOTOS = [], EDITS = {}, cur = -1;   // PHOTOS: metadata (no images), sorted; EDITS: key -> edit metadata
+let S = null;                             // the open photo
+let tool = 'polygon', cls = 150, brush = 8, opacity = 0.45, insideOnly = true, showOutline = true, hidden = false;
+let straight = false, fingerDraw = false;
+let view = {s:1, ox:0, oy:0}, dpr = window.devicePixelRatio || 1;
+let poly = [], lasso = null, stroke = null, hover = null, lastPt = null, shiftDown = false, lastTap = null;
+let drawPointer = null, drawType = null, drawClient = null;   // the pen / finger / mouse that is drawing
+const touches = new Map(); let gesture = null; let panMouse = null; let spaceDown = false;
+let cv, ctx, ov, ovctx, stage, saveTimer = null;
+
+function msg(t, ms){ const m = $('msg'); m.innerHTML = t; m.style.display = 'block'; clearTimeout(msg.t); if (ms) msg.t = setTimeout(() => m.style.display = 'none', ms); }
+
+// ---------------------------------------------------------------- loading a batch
+async function loadBatchFile(file){
+  msg('Reading ' + file.name + ' ...');
+  let doc;
+  try { doc = JSON.parse(await file.text()); } catch(e) { msg('That file could not be read as a batch (' + e.message + ').', 6000); return; }
+  if (!doc || doc.format !== 'region-editor-batch') { msg('That is not a batch file (made by export_for_ipad() on the Mac).', 6000); return; }
+  let added = 0, kept = 0;
+  const have = new Set(PHOTOS.map(p => p.key));
+  let order = PHOTOS.length;
+  for (const p of doc.photos) {
+    if (have.has(p.key)) { kept++; continue; }       // already here (your work on it is kept)
+    await dbPut('photos', {key:p.key, order:order++, batch_id:doc.batch_id, observation_id:p.observation_id, photo_id:p.photo_id,
+      photo_url:p.photo_url, source:p.source, uncertainty:p.uncertainty, worst_dE:p.worst_dE, status0:p.status,
+      img:dataURLtoBlob(p.img), pred:dataURLtoBlob(p.pred), outline:dataURLtoBlob(p.outline),
+      edit0:dataURLtoBlob(p.edit), touched0:dataURLtoBlob(p.touched)});
+    added++;
+  }
+  const batches = (await dbGet('meta', 'batches'))?.v || [];
+  batches.push({batch_id:doc.batch_id, created_at:doc.created_at, model_id:doc.model_id, project:doc.project, loaded_at:new Date().toISOString(), n:doc.photos.length});
+  await dbPut('meta', {k:'batches', v:batches});
+  await refreshList(); updateTitle();
+  msg('Loaded batch ' + doc.batch_id + ': ' + added + ' new photos' + (kept ? ' (' + kept + ' were already here)' : '') + '.', 5000);
+  if (cur < 0 && PHOTOS.length) openPhoto(firstToDo());
+}
+async function refreshList(){
+  const ps = await dbAll('photos');
+  PHOTOS = ps.map(p => ({key:p.key, order:p.order, batch_id:p.batch_id, observation_id:p.observation_id, photo_id:p.photo_id,
+    source:p.source, uncertainty:p.uncertainty, status0:p.status0})).sort((a, b) => a.order - b.order);
+  EDITS = {}; for (const e of await dbAll('edits')) EDITS[e.key] = {status:e.status, saved_at:e.saved_at, n_touched:e.n_touched, exported_at:e.exported_at};
+  renderList(); renderBatchInfo();
+}
+function statusOf(p){ return EDITS[p.key]?.status || (p.status0 === 'in_progress' ? 'in_progress' : 'to do'); }
+function firstToDo(){ const i = PHOTOS.findIndex(p => ['to do', 'in_progress'].includes(statusOf(p))); return i < 0 ? 0 : i; }
+const DOT = {'to do':'#777', in_progress:'#e0a030', fixed:'#43a047', looks_right:'#1e88e5', skipped:'#8d6e63'};
+function renderList(){
+  const f = $('filter').value, L = $('list'); L.innerHTML = '';
+  PHOTOS.forEach((p, i) => {
+    const st = statusOf(p);
+    if (f === 'todo' && !['to do', 'in_progress'].includes(st)) return;
+    if (!['todo', 'all'].includes(f) && st !== f) return;
+    const d = document.createElement('div'); d.className = 'item' + (i === cur ? ' cur' : '');
+    d.innerHTML = '<span class="dot" style="background:' + DOT[st] + '"></span><span style="flex:1">' + p.key +
+      '<br><span class="small">' + st.replace('_', ' ') + ' &middot; ' + (p.source || '') + (p.uncertainty != null ? ' &middot; unsure ' + p.uncertainty : '') + '</span></span>';
+    d.onclick = () => { openPhoto(i); closeDrawer(); };
+    L.appendChild(d);
+  });
+  if (!L.children.length) L.innerHTML = '<div class="small" style="padding:10px 4px">' + (PHOTOS.length ? 'No photos in this list.' : 'No photos yet: Load batch.') + '</div>';
+}
+async function renderBatchInfo(){
+  const n = c => PHOTOS.filter(p => statusOf(p) === c).length;
+  const notExp = Object.values(EDITS).filter(e => e.status !== 'to do' && (!e.exported_at || e.exported_at < e.saved_at)).length;
+  $('batchInfo').innerHTML = PHOTOS.length ? (PHOTOS.length + ' photos: ' + n('to do') + ' to do, ' + n('in_progress') + ' in progress, ' + n('fixed') +
+    ' fixed, ' + n('looks_right') + ' looks right, ' + n('skipped') + ' skipped.<br>' +
+    (notExp ? '<b style="color:#ffb74d">' + notExp + ' edited photo(s) not exported yet.</b>' : 'Everything is exported.')) : '';
+}
+
+// ---------------------------------------------------------------- opening a photo
+function loadImg(blob){ return new Promise((res, rej) => { if (!blob) { res(null); return; } const u = URL.createObjectURL(blob); const im = new Image();
+  im.onload = () => res(im); im.onerror = () => rej(new Error('image')); im.src = u; }); }
+function grayOf(im, W, H){ const c = document.createElement('canvas'); c.width = W; c.height = H; const x = c.getContext('2d', {willReadFrequently:true});
+  x.imageSmoothingEnabled = false; x.drawImage(im, 0, 0, W, H); const d = x.getImageData(0, 0, W, H).data; const out = new Uint8Array(W * H);
+  for (let i = 0; i < W * H; i++) out[i] = d[4 * i]; return out; }
+function snapCode(v){ let c = Math.round(v / 50) * 50; if (c > 200) c = 0; return c; }
+
+async function openPhoto(i){
+  if (i < 0 || i >= PHOTOS.length) return;
+  await flushSave();
+  const meta = PHOTOS[i];
+  try {
+    const p = await dbGet('photos', meta.key); const e = await dbGet('edits', meta.key);
+    const [im, pr, ol, ed, tc] = await Promise.all([loadImg(p.img), loadImg(p.pred), loadImg(p.outline),
+      loadImg(e ? e.label : p.edit0), loadImg(e ? e.touched : p.touched0)]);
+    const W = im.naturalWidth, H = im.naturalHeight;
+    const pred = grayOf(pr, W, H).map(snapCode);
+    const outline = grayOf(ol, W, H).map(v => v > 127 ? 1 : 0);
+    const labels = ed ? grayOf(ed, W, H).map(snapCode) : pred.slice();
+    const touched = tc ? grayOf(tc, W, H).map(v => v > 127 ? 1 : 0) : new Uint8Array(W * H);
+    const edge = new Uint8Array(W * H);
+    for (let y = 1; y < H - 1; y++) for (let x = 1; x < W - 1; x++) { const k = y * W + x;
+      if (outline[k] && (!outline[k - 1] || !outline[k + 1] || !outline[k - W] || !outline[k + W])) edge[k] = 1; }
+    S = {key:meta.key, meta, im, W, H, pred, outline, labels, touched, edge, undo:[], dirty:false, status:statusOf(meta)};
+    ov = document.createElement('canvas'); ov.width = W; ov.height = H; ovctx = ov.getContext('2d');
+    cur = i; poly = []; lasso = null; stroke = null; lastPt = null;
+    rebuild(); fit(); updateTitle(); renderList(); $('msg').style.display = 'none'; updateCloseBtn();
+  } catch(err) { msg('Could not open this photo (' + err.message + ').', 5000); }
+}
+function updateTitle(){
+  if (!S) { $('title').innerHTML = PHOTOS.length ? 'Pick a photo: &#9776; Photos' : 'No photos yet: tap &#9776; Photos &gt; Load batch'; return; }
+  let n = 0; for (let k = 0; k < S.W * S.H; k++) n += S.touched[k];
+  $('title').innerHTML = '<b>' + (cur + 1) + ' / ' + PHOTOS.length + '</b> &nbsp;' + S.key + ' &middot; ' + S.status.replace('_', ' ') +
+    ' &middot; painted ' + n.toLocaleString() + ' px' + (S.dirty ? ' &middot; <b style="color:#ffb74d">saving&hellip;</b>' : '');
+}
+
+// ---------------------------------------------------------------- drawing
+function rebuild(){
+  if (!S) return;
+  const {W, H, labels, touched, edge} = S; const img = ovctx.createImageData(W, H); const d = img.data;
+  const a0 = Math.round(opacity * 255), a1 = Math.min(255, a0 + 90);
+  for (let k = 0; k < W * H; k++) { const c = COL[labels[k]], j = 4 * k;
+    if (c) { d[j] = c[0]; d[j + 1] = c[1]; d[j + 2] = c[2]; d[j + 3] = touched[k] ? a1 : a0; }
+    else { d[j] = 0; d[j + 1] = 0; d[j + 2] = 0; d[j + 3] = Math.round(opacity * 140); }
+    if (showOutline && edge[k]) { d[j] = 255; d[j + 1] = 255; d[j + 2] = 255; d[j + 3] = 230; } }
+  ovctx.putImageData(img, 0, 0); draw();
+}
+function fit(){ if (!S) return; const w = stage.clientWidth, h = stage.clientHeight;
+  view.s = Math.min(w / S.W, h / S.H); view.ox = (w - S.W * view.s) / 2; view.oy = (h - S.H * view.s) / 2; draw(); }
+function toImg(e){ const r = cv.getBoundingClientRect(); const sx = e.clientX - r.left, sy = e.clientY - r.top;
+  return {x:(sx - view.ox) / view.s, y:(sy - view.oy) / view.s, sx, sy}; }
+function draw(){
+  const w = stage.clientWidth, h = stage.clientHeight;
+  if (cv.width !== Math.round(w * dpr) || cv.height !== Math.round(h * dpr)) { cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr); cv.style.width = w + 'px'; cv.style.height = h + 'px'; }
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.fillStyle = '#111'; ctx.fillRect(0, 0, w, h);
+  if (!S) return;
+  ctx.imageSmoothingEnabled = view.s < 2;
+  ctx.setTransform(dpr * view.s, 0, 0, dpr * view.s, dpr * view.ox, dpr * view.oy);
+  ctx.drawImage(S.im, 0, 0); if (!hidden) ctx.drawImage(ov, 0, 0);
+  const col = cls >= 50 ? 'rgb(' + COL[cls].join(',') + ')' : (cls === 0 ? '#ff4444' : '#ffffff');
+  ctx.lineWidth = 2 / view.s;
+  if (poly.length) {
+    ctx.strokeStyle = col; ctx.fillStyle = col; ctx.beginPath(); ctx.moveTo(poly[0].x, poly[0].y);
+    for (const p of poly) ctx.lineTo(p.x, p.y); if (hover) ctx.lineTo(hover.x, hover.y); ctx.stroke();
+    for (const p of poly) { ctx.beginPath(); ctx.arc(p.x, p.y, 3.5 / view.s, 0, 7); ctx.fill(); }
+    ctx.beginPath(); ctx.arc(poly[0].x, poly[0].y, 12 / view.s, 0, 7); ctx.stroke();
+  }
+  if (lasso && lasso.length > 1) { ctx.strokeStyle = col; ctx.beginPath(); ctx.moveTo(lasso[0].x, lasso[0].y); for (const p of lasso) ctx.lineTo(p.x, p.y); ctx.stroke(); }
+  if (stroke && stroke.length) { ctx.strokeStyle = col; ctx.globalAlpha = .5; ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.lineWidth = 2 * brush;
+    ctx.beginPath(); ctx.moveTo(stroke[0].x, stroke[0].y); for (const p of stroke) ctx.lineTo(p.x, p.y);
+    if (stroke.length === 1) ctx.lineTo(stroke[0].x + .01, stroke[0].y); ctx.stroke(); ctx.globalAlpha = 1; }
+  if (tool === 'brush' && (straight || shiftDown) && lastPt && hover && !stroke) {
+    ctx.strokeStyle = '#fff'; ctx.setLineDash([6 / view.s, 4 / view.s]); ctx.lineWidth = 1 / view.s;
+    ctx.beginPath(); ctx.moveTo(lastPt.x, lastPt.y); ctx.lineTo(hover.x, hover.y); ctx.stroke(); ctx.setLineDash([]); }
+  if (tool === 'brush' && hover) { ctx.strokeStyle = '#fff'; ctx.lineWidth = 1 / view.s; ctx.beginPath(); ctx.arc(hover.x, hover.y, brush, 0, 7); ctx.stroke(); }
+}
+function apply(fn, thr){
+  thr = thr || 128;
+  const {W, H, labels, touched, outline, pred} = S;
+  const c = document.createElement('canvas'); c.width = W; c.height = H; const x = c.getContext('2d', {willReadFrequently:true});
+  x.fillStyle = '#fff'; x.strokeStyle = '#fff'; fn(x);
+  const d = x.getImageData(0, 0, W, H).data; const idx = [], oldL = [], oldT = [];
+  for (let k = 0; k < W * H; k++) {
+    if (d[4 * k + 3] < thr) continue;
+    if (cls >= 50 && insideOnly && !outline[k]) continue;
+    const nl = cls === 1 ? pred[k] : cls, nt = cls === 1 ? 0 : 1;
+    if (labels[k] === nl && touched[k] === nt) continue;
+    idx.push(k); oldL.push(labels[k]); oldT.push(touched[k]); labels[k] = nl; touched[k] = nt;
+  }
+  if (idx.length) { S.undo.push({idx, oldL, oldT}); if (S.undo.length > 60) S.undo.shift(); changed(); }
+  else if (cls >= 50 && insideOnly) msg('Nothing painted: that area is outside the outline (untick "inside outline only" to paint there).', 3500);
+  rebuild();
+}
+// replace every pixel of one region (the model's and yours) with the selected paint; one undo step
+function replaceAll(from){
+  if(!S) return;
+  const {W,H,labels,touched,pred} = S; const idx=[], oldL=[], oldT=[];
+  if(from===cls){ msg('Pick a different paint first: the selected paint is the same region.', 3000); return; }
+  for(let i=0;i<W*H;i++){
+    if(labels[i]!==from) continue;
+    const nl = cls===1 ? pred[i] : cls, nt = cls===1 ? 0 : 1;
+    if(labels[i]===nl && touched[i]===nt) continue;
+    idx.push(i); oldL.push(labels[i]); oldT.push(touched[i]); labels[i]=nl; touched[i]=nt;
+  }
+  if(!idx.length){ msg('There is no '+(NAMES[from]||from)+' on this photo.', 2500); return; }
+  S.undo.push({idx, oldL, oldT}); if(S.undo.length>60) S.undo.shift();
+  changed();
+  rebuild();
+  msg('Replaced '+idx.length.toLocaleString()+' px of '+(NAMES[from]||from)+' with '+(cls===1?"the model's guess":NAMES[cls])+' (Z undoes it).', 3500);
+}
+function closePoly(){
+  const p = poly.filter((q, i) => i === 0 || Math.hypot(q.x - poly[i - 1].x, q.y - poly[i - 1].y) > .5);
+  poly = []; updateCloseBtn();
+  if (p.length < 3) { draw(); return; }
+  apply(x => { x.beginPath(); x.moveTo(p[0].x, p[0].y); for (const q of p) x.lineTo(q.x, q.y); x.closePath(); x.fill(); });
+}
+function brushLine(L){ lastPt = L[L.length - 1];
+  apply(x => { x.lineCap = 'round'; x.lineJoin = 'round'; x.lineWidth = 2 * brush; x.beginPath(); x.moveTo(L[0].x, L[0].y);
+    for (const q of L) x.lineTo(q.x, q.y); if (L.length === 1) x.lineTo(L[0].x + .01, L[0].y); x.stroke(); }, brush < 2 ? 60 : 128); }
+function undo(){
+  if (poly.length) { poly.pop(); updateCloseBtn(); draw(); return; }
+  const u = S && S.undo.pop(); if (!u) return;
+  for (let k = 0; k < u.idx.length; k++) { S.labels[u.idx[k]] = u.oldL[k]; S.touched[u.idx[k]] = u.oldT[k]; }
+  changed(); rebuild();
+}
+function updateCloseBtn(){ $('closeShape').style.display = (tool === 'polygon' && poly.length >= 3) ? 'block' : 'none'; }
+
+// ---------------------------------------------------------------- saving (on this iPad)
+function changed(){ S.dirty = true; if (!['in_progress'].includes(S.status)) S.status = 'in_progress'; updateTitle();
+  clearTimeout(saveTimer); saveTimer = setTimeout(() => saveCurrent('in_progress'), 1200); }
+async function flushSave(){ if (S && S.dirty) { clearTimeout(saveTimer); await saveCurrent(S.status === 'to do' ? 'in_progress' : S.status); } }
+function codesCanvas(arr, f){ const {W, H} = S; const c = document.createElement('canvas'); c.width = W; c.height = H; const x = c.getContext('2d');
+  const img = x.createImageData(W, H); const d = img.data; for (let k = 0; k < W * H; k++) { const v = f(arr[k]); d[4 * k] = v; d[4 * k + 1] = v; d[4 * k + 2] = v; d[4 * k + 3] = 255; }
+  x.putImageData(img, 0, 0); return c; }
+async function saveCurrent(status){
+  if (!S) return; const s0 = S;
+  let n = 0; const seen = {}; for (let k = 0; k < s0.W * s0.H; k++) if (s0.touched[k]) { n++; seen[s0.labels[k]] = 1; }
+  const label = await canvasBlob(codesCanvas(s0.labels, v => v)), touched = await canvasBlob(codesCanvas(s0.touched, v => v ? 255 : 0));
+  const prev = await dbGet('edits', s0.key);
+  const rec = {key:s0.key, batch_id:s0.meta.batch_id, observation_id:s0.meta.observation_id, photo_id:s0.meta.photo_id, status,
+    saved_at:new Date().toISOString(), n_touched:n, classes:Object.keys(seen).map(k => NAMES[k] || k), label, touched,
+    exported_at:prev ? prev.exported_at : null};
+  await dbPut('edits', rec);
+  EDITS[s0.key] = {status, saved_at:rec.saved_at, n_touched:n, exported_at:rec.exported_at};
+  if (S === s0) { s0.dirty = false; s0.status = status; updateTitle(); }
+  renderBatchInfo();
+}
+async function mark(status){
+  if (!S) return;
+  if (status === 'fixed') { let n = 0; for (let k = 0; k < S.W * S.H; k++) n += S.touched[k];
+    if (!n) { msg('Nothing painted yet. If the regions are right, tap "Looks right".', 3500); return; } }
+  clearTimeout(saveTimer); await saveCurrent(status);
+  msg({fixed:'Saved as fixed.', looks_right:'Saved: looks right.', skipped:'Skipped.'}[status], 1800);
+  renderList(); next(1);
+}
+function next(d){
+  if (!PHOTOS.length) return;
+  const j = cur + d;
+  if (j < 0) { msg('This is the first photo.', 1500); return; }
+  if (j >= PHOTOS.length) { msg('That was the last photo. &#9776; Photos &gt; Export edits sends your work to the Mac.', 4000); return; }
+  openPhoto(j);
+}
+
+// ---------------------------------------------------------------- export / clean up
+async function exportEdits(){
+  await flushSave();
+  const all = await dbAll('edits');
+  const list = all.filter(e => e.status && e.status !== 'to do');
+  if (!list.length) { msg('Nothing to export yet.', 2500); return; }
+  msg('Preparing ' + list.length + ' edits ...');
+  const out = [];
+  for (const e of list) out.push({key:e.key, batch_id:e.batch_id, observation_id:e.observation_id, photo_id:e.photo_id, status:e.status,
+    saved_at:e.saved_at, n_touched:e.n_touched, classes:e.classes, label:await blobToDataURL(e.label), touched:await blobToDataURL(e.touched)});
+  const stamp = new Date().toISOString().replace(/[:T]/g, '-').slice(0, 16);
+  const doc = {format:'region-editor-edits', version:1, exported_at:new Date().toISOString(), app_version:APP_VERSION, edits:out};
+  const file = new File([JSON.stringify(doc)], 'region_edits_' + stamp + '.json', {type:'application/json'});
+  let ok = false;
+  try {
+    if (navigator.canShare && navigator.canShare({files:[file]})) { await navigator.share({files:[file], title:'Region edits'}); ok = true; }
+  } catch(err) { if (err && err.name === 'AbortError') { msg('Export cancelled.', 2500); return; } }
+  if (!ok) { const a = document.createElement('a'); a.href = URL.createObjectURL(file); a.download = file.name; document.body.appendChild(a); a.click();
+    setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 4000); ok = true; }
+  const now = new Date().toISOString();
+  for (const e of list) { e.exported_at = now; await dbPut('edits', e); }
+  await refreshList();
+  msg('Exported ' + list.length + ' edits as ' + file.name + '. On the Mac: import_ipad_edits().', 6000);
+}
+async function cleanExported(){
+  const all = await dbAll('edits');
+  const done = all.filter(e => ['fixed', 'looks_right', 'skipped'].includes(e.status) && e.exported_at && e.exported_at >= e.saved_at).map(e => e.key);
+  if (!done.length) { msg('No finished photos have been exported yet.', 3000); return; }
+  if (!confirm('Remove ' + done.length + ' finished, exported photos from this iPad? (Photos still to do or in progress stay.)')) return;
+  for (const k of done) { await dbDel('photos', k); await dbDel('edits', k); }
+  S = null; cur = -1; await refreshList(); draw(); updateTitle();
+  msg('Removed ' + done.length + ' photos.', 2500);
+  if (PHOTOS.length) openPhoto(firstToDo());
+}
+
+// ---------------------------------------------------------------- input: Pencil, fingers, mouse, keyboard
+function isDrawer(e){ return e.pointerType === 'pen' || (e.pointerType === 'mouse' && e.button === 0 && !e.altKey && !spaceDown) ||
+  (e.pointerType === 'touch' && fingerDraw && touches.size === 0 && drawPointer === null); }
+function startDraw(e){
+  const p = toImg(e); drawPointer = e.pointerId; drawType = e.pointerType; drawClient = {x:e.clientX, y:e.clientY}; hover = {x:p.x, y:p.y};
+  if (tool === 'polygon') {
+    const now = Date.now();
+    const dbl = lastTap && now - lastTap.t < 350 && Math.hypot(p.sx - lastTap.sx, p.sy - lastTap.sy) < 20;
+    lastTap = {t:now, sx:p.sx, sy:p.sy};
+    if (poly.length >= 3 && (dbl || Math.hypot(p.x - poly[0].x, p.y - poly[0].y) * view.s < 18)) { closePoly(); drawPointer = null; return; }
+    poly.push({x:p.x, y:p.y}); updateCloseBtn(); draw();
+  } else if (tool === 'lasso') { lasso = [{x:p.x, y:p.y}]; }
+  else if (tool === 'brush') { stroke = [{x:p.x, y:p.y}]; stroke.t0 = {sx:p.sx, sy:p.sy}; draw(); }
+}
+function moveDraw(e){
+  const p = toImg(e); hover = {x:p.x, y:p.y}; drawClient = {x:e.clientX, y:e.clientY};
+  if (lasso) lasso.push({x:p.x, y:p.y});
+  if (stroke) { const t0 = stroke.t0; if (straight || e.shiftKey) { stroke = [stroke[0], {x:p.x, y:p.y}]; } else stroke.push({x:p.x, y:p.y}); stroke.t0 = t0; }
+  draw();
+}
+function endDraw(e){
+  drawPointer = null; drawType = null;
+  if (lasso) { const L = lasso; lasso = null; if (L.length > 2) apply(x => { x.beginPath(); x.moveTo(L[0].x, L[0].y); for (const q of L) x.lineTo(q.x, q.y); x.closePath(); x.fill(); }); else draw(); }
+  if (stroke) { let L = stroke; stroke = null; const p = toImg(e);
+    const tapped = Math.hypot(p.sx - L.t0.sx, p.sy - L.t0.sy) < 4;
+    if ((straight || e.shiftKey) && tapped && lastPt) L = [lastPt, L[0]];       // a tap in straight mode: straight on from the last stroke
+    brushLine(L); }
+  if (e.pointerType !== 'mouse') hover = null;
+}
+function cancelDraw(){ drawPointer = null; drawType = null; lasso = null; stroke = null; draw(); }
+
+function initInput(){
+  cv.addEventListener('contextmenu', e => e.preventDefault());
+  cv.addEventListener('pointerdown', e => {
+    stage.focus({preventScroll:true}); if (!S) return; e.preventDefault();
+    try { cv.setPointerCapture(e.pointerId); } catch(_) {}
+    if (drawPointer === null && isDrawer(e)) { startDraw(e); return; }
+    if (e.pointerType === 'touch') {
+      if (drawPointer !== null && drawType === 'pen') return;    // a palm while the Pencil draws: ignore
+      if (drawPointer !== null && drawType === 'touch') {         // a second finger: it is a pinch, not a stroke
+        const id = drawPointer, at = drawClient; cancelDraw(); touches.set(id, at); }
+      touches.set(e.pointerId, {x:e.clientX, y:e.clientY}); startGesture(); return; }
+    if (e.pointerType === 'mouse') panMouse = {x:e.clientX, y:e.clientY, ox:view.ox, oy:view.oy};
+  });
+  cv.addEventListener('pointermove', e => {
+    if (!S) return;
+    if (e.pointerId === drawPointer) { moveDraw(e); return; }
+    if (touches.has(e.pointerId)) { touches.set(e.pointerId, {x:e.clientX, y:e.clientY}); moveGesture(); return; }
+    if (panMouse) { view.ox = panMouse.ox + e.clientX - panMouse.x; view.oy = panMouse.oy + e.clientY - panMouse.y; draw(); return; }
+    if (e.pointerType !== 'touch') { const p = toImg(e); hover = {x:p.x, y:p.y}; draw(); }   // mouse or Pencil hover
+  });
+  const up = e => {
+    if (e.pointerId === drawPointer) { if (e.type === 'pointercancel') cancelDraw(); else endDraw(e); return; }
+    if (touches.has(e.pointerId)) { touches.delete(e.pointerId); startGesture(); return; }
+    panMouse = null;
+  };
+  cv.addEventListener('pointerup', up); cv.addEventListener('pointercancel', up);
+  cv.addEventListener('pointerleave', e => { if (e.pointerType !== 'touch' && drawPointer === null) { hover = null; draw(); } });
+  cv.addEventListener('wheel', e => {                 // trackpad / mouse (for testing on a computer)
+    if (!S) return; e.preventDefault(); const p = toImg(e);
+    if (e.shiftKey && !e.ctrlKey) { view.ox -= e.deltaX; view.oy -= e.deltaY; draw(); return; }
+    const f = e.ctrlKey ? Math.exp(-e.deltaY * .01) : Math.exp(e.deltaY * .002);
+    const s2 = Math.min(40, Math.max(.05, view.s * f)); view.ox = p.sx - p.x * s2; view.oy = p.sy - p.y * s2; view.s = s2; draw();
+  }, {passive:false});
+  // Safari's own pinch-zoom of the page: off
+  document.addEventListener('gesturestart', e => e.preventDefault());
+  document.addEventListener('gesturechange', e => e.preventDefault());
+  document.addEventListener('dblclick', e => e.preventDefault(), {passive:false});
+
+  stage.addEventListener('keydown', e => {
+    const k = e.key;
+    if (k === ' ') { spaceDown = true; e.preventDefault(); return; }
+    if (k === 'Shift') { shiftDown = true; draw(); return; }
+    if ((e.metaKey || e.ctrlKey) && k.toLowerCase() === 'z') { undo(); e.preventDefault(); return; }
+    if ((e.metaKey || e.ctrlKey) && k.toLowerCase() === 's') { flushSave(); msg('Saved.', 1200); e.preventDefault(); return; }
+    if (e.metaKey || e.ctrlKey) return;
+    const map = {'1':50, '2':100, '3':150, '4':200, 'e':0, 'E':0, '6':1};
+    if (k in map) { setCls(map[k]); return; }
+    switch (k.toLowerCase()) {
+      case 'p': setTool('polygon'); break; case 'l': setTool('lasso'); break; case 'b': setTool('brush'); break;
+      case '[': brushStep(-1); break; case ']': brushStep(1); break; case 'z': undo(); break;
+      case 'h': if (!hidden) { hidden = true; draw(); } break;
+      case 'o': showOutline = !showOutline; $('chkOutline').checked = showOutline; rebuild(); break;
+      case 'f': fit(); break; case 'enter': if (tool === 'polygon') closePoly(); break;
+      case 'escape': poly = []; lasso = null; stroke = null; updateCloseBtn(); draw(); break;
+      case 'backspace': if (poly.length) { poly.pop(); updateCloseBtn(); draw(); } break;
+      case 's': mark('fixed'); break; case 'g': mark('looks_right'); break; case 'k': mark('skipped'); break;
+      case 'n': case 'arrowright': next(1); break; case 'arrowleft': next(-1); break;
+      default: return;
+    }
+    e.preventDefault();
+  });
+  stage.addEventListener('keyup', e => { if (e.key === ' ') spaceDown = false; if (e.key === 'Shift') { shiftDown = false; draw(); }
+    if (e.key.toLowerCase() === 'h') { hidden = false; draw(); } });
+}
+// one finger moves the photo, two fingers pinch-zoom (and move)
+function startGesture(){
+  const pts = [...touches.values()];
+  if (!pts.length) { gesture = null; return; }
+  const r = cv.getBoundingClientRect();
+  const mid = pts.length > 1 ? {x:(pts[0].x + pts[1].x) / 2 - r.left, y:(pts[0].y + pts[1].y) / 2 - r.top} : {x:pts[0].x - r.left, y:pts[0].y - r.top};
+  gesture = {n:pts.length, mid, dist:pts.length > 1 ? Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y) : 0, s:view.s, ox:view.ox, oy:view.oy};
+}
+function moveGesture(){
+  const pts = [...touches.values()]; if (!gesture || !pts.length) return;
+  if (pts.length !== gesture.n) { startGesture(); return; }
+  const r = cv.getBoundingClientRect(), g = gesture;
+  const mid = pts.length > 1 ? {x:(pts[0].x + pts[1].x) / 2 - r.left, y:(pts[0].y + pts[1].y) / 2 - r.top} : {x:pts[0].x - r.left, y:pts[0].y - r.top};
+  let s = g.s;
+  if (pts.length > 1 && g.dist > 0) s = Math.min(40, Math.max(.05, g.s * Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y) / g.dist));
+  const ix = (g.mid.x - g.ox) / g.s, iy = (g.mid.y - g.oy) / g.s;     // the photo point under the fingers at the start
+  view.s = s; view.ox = mid.x - ix * s; view.oy = mid.y - iy * s; draw();
+}
+
+// ---------------------------------------------------------------- toolbar
+function setTool(t){ tool = t; poly = []; lasso = null; stroke = null; document.querySelectorAll('[data-tool]').forEach(b => b.classList.toggle('on', b.dataset.tool === t)); updateCloseBtn(); draw(); }
+function setCls(c){ cls = c; document.querySelectorAll('[data-cls]').forEach(b => b.classList.toggle('on', +b.dataset.cls === c)); draw(); }
+function brushStep(d){ let j = BRUSH_SIZES.indexOf(brush); j = Math.max(0, Math.min(BRUSH_SIZES.length - 1, j + d)); brush = BRUSH_SIZES[j]; $('brushv').textContent = brush; draw(); }
+function openDrawer(){ renderList(); renderBatchInfo(); $('drawer').classList.add('open'); $('scrim').style.display = 'block'; }
+function closeDrawer(){ $('drawer').classList.remove('open'); $('scrim').style.display = 'none'; stage.focus({preventScroll:true}); }
+
+async function main(){
+  cv = $('cv'); ctx = cv.getContext('2d'); stage = $('stage');
+  $('ver').textContent = APP_VERSION;
+  new ResizeObserver(() => { if (S) fit(); else draw(); }).observe(stage);
+  window.addEventListener('resize', () => { dpr = window.devicePixelRatio || 1; draw(); });
+  initInput();
+  document.querySelectorAll('[data-tool]').forEach(b => b.onclick = () => setTool(b.dataset.tool));
+  document.querySelectorAll('[data-cls]').forEach(b => b.onclick = () => setCls(+b.dataset.cls));
+  $('bStraight').onclick = () => { straight = !straight; $('bStraight').classList.toggle('on', straight); draw(); };
+  $('bBrushMinus').onclick = () => brushStep(-1); $('bBrushPlus').onclick = () => brushStep(1);
+  $('bUndo').onclick = undo; $('bFit').onclick = fit;
+  $('bReplace').onclick = () => replaceAll(+$('selFrom').value);
+  const hide = v => { hidden = v; draw(); };
+  $('bHide').addEventListener('pointerdown', e => { e.preventDefault(); hide(true); });
+  for (const ev of ['pointerup', 'pointercancel', 'pointerleave']) $('bHide').addEventListener(ev, () => hide(false));
+  $('chkInside').onchange = e => insideOnly = e.target.checked;
+  $('chkOutline').onchange = e => { showOutline = e.target.checked; rebuild(); };
+  $('op').oninput = e => { opacity = +e.target.value; rebuild(); };
+  $('chkFinger').onchange = e => { fingerDraw = e.target.checked; try { localStorage.setItem('fingerDraw', fingerDraw ? '1' : ''); } catch(_) {} };
+  $('bPrev').onclick = () => next(-1); $('bNext').onclick = () => next(1);
+  $('bFixed').onclick = () => mark('fixed'); $('bOk').onclick = () => mark('looks_right'); $('bSkip').onclick = () => mark('skipped');
+  $('closeShape').onclick = closePoly;
+  $('bMenu').onclick = openDrawer; $('scrim').onclick = closeDrawer;
+  $('bLoad').onclick = () => $('fileIn').click();
+  $('fileIn').onchange = async e => { const f = e.target.files[0]; e.target.value = ''; if (f) { closeDrawer(); await loadBatchFile(f); } };
+  $('bExport').onclick = async () => { closeDrawer(); await exportEdits(); };
+  $('bClean').onclick = cleanExported;
+  $('bHelp').onclick = () => { const h = $('help'); h.style.display = h.style.display === 'none' ? 'block' : 'none'; };
+  $('filter').onchange = renderList;
+  try { fingerDraw = localStorage.getItem('fingerDraw') === '1'; $('chkFinger').checked = fingerDraw; } catch(_) {}
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flushSave(); });
+  window.addEventListener('pagehide', () => { flushSave(); });
+  setTool('polygon'); setCls(150);
+  try { DB = await openDB(); } catch(e) { msg('This browser will not store data (' + e.message + '). Open the app from the Home Screen, not a private tab.', 10000); return; }
+  if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
+  await refreshList();
+  if (PHOTOS.length) openPhoto(firstToDo()); else { updateTitle(); draw(); }
+  if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').then(reg => {
+    reg.addEventListener('updatefound', () => { const w = reg.installing; if (!w) return;
+      w.addEventListener('statechange', () => { if (w.state === 'installed' && navigator.serviceWorker.controller)
+        msg('A new version of the editor is ready: close and reopen the app to use it.', 8000); }); });
+  }).catch(() => {});
+}
+main();
+</script>
+</body>
+</html>
