@@ -1,6 +1,6 @@
 // Keeps the editor working offline: the app's own files are stored on the iPad the first time it opens
 // (online), then always served from there. Your photos and edits are in the app's database, not here.
-const CACHE = 'region-editor-v5';
+const CACHE = 'region-editor-v6';
 const FILES = ['./', './index.html', './manifest.webmanifest', './icon-192.png', './icon-512.png', './apple-touch-icon.png'];
 self.addEventListener('install', e => { e.waitUntil(caches.open(CACHE).then(c => c.addAll(FILES)).then(() => self.skipWaiting())); });
 self.addEventListener('activate', e => { e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== CACHE).map(k => caches.delete(k))))

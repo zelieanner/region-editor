@@ -66,7 +66,8 @@ label.tg input { width:20px; height:20px; }
     <button data-tool="lasso">Lasso</button>
     <button data-tool="brush">Brush</button>
     <button id="bStraight" title="Brush: straight lines">&#8212; Straight</button>
-    <button id="bBrushMinus">&minus;</button><span id="brushv" style="min-width:26px;text-align:center">8</span><button id="bBrushPlus">+</button>
+    <label class="tg" title="Brush size (radius in photo pixels)">size <input type="range" id="brushSlider" min="0" max="20" step="1" value="8" style="width:150px;min-width:150px"></label>
+    <span id="brushv" style="min-width:30px;text-align:center">8</span>
   </div>
   <div class="grp">
     <button id="bUndo">&#8630; Undo</button>
@@ -118,7 +119,7 @@ label.tg input { width:20px; height:20px; }
   <div class="small" id="help" style="display:none">
     <b>Pencil</b> draws: Polygon = tap the corners, then tap the first corner, double-tap, or "Close shape".
     Lasso = draw around an area. <b>Replace all</b>: every pixel of one region (e.g. all blotch) becomes the selected paint.
-    Brush = paint; &minus; / + size; Straight = straight lines (a tap draws straight on from the last stroke).
+    Brush (the starting tool) = paint; the size slider shows the brush on the photo as you slide; Straight = straight lines (a tap draws straight on from the last stroke).
     <b>Fingers</b>: one finger moves the photo, two fingers pinch to zoom and twist to rotate (it snaps upright when close; Fit straightens it). "Inside outline only": head / body / stripe /
     blotch only land inside the white outline, so you can go roughly around the snake's outside edge.
     <b>Kinked</b> marks the whole photo (saved at once, exported with your edits).
@@ -133,7 +134,7 @@ label.tg input { width:20px; height:20px; }
 
 <script>
 'use strict';
-const APP_VERSION = 'region editor (iPad) 1.4';
+const APP_VERSION = 'region editor (iPad) 1.5';
 // region codes in the saved maps: 0 not snake, 25 eye, 75 glare, 100 body, 150 stripe, 200 blotch
 // (head, 50, is no longer used: since v5 the head counts as body, so old head paint shows as body)
 const COL = {25:[213,94,0], 75:[240,228,66], 100:[86,180,233], 150:[0,158,115], 200:[204,121,167]};
@@ -168,7 +169,7 @@ function canvasBlob(c){ return new Promise(res => c.toBlob(res, 'image/png')); }
 // ---------------------------------------------------------------- state
 let PHOTOS = [], EDITS = {}, cur = -1;   // PHOTOS: metadata (no images), sorted; EDITS: key -> edit metadata
 let S = null;                             // the open photo
-let tool = 'polygon', cls = 150, brush = 8, opacity = 0.45, insideOnly = true, showOutline = true, hidden = false;
+let tool = 'brush', cls = 150, brush = 8, brushPreviewUntil = 0, opacity = 0.45, insideOnly = true, showOutline = true, hidden = false;
 let straight = false, fingerDraw = false;
 let view = {s:1, ox:0, oy:0, r:0}, dpr = window.devicePixelRatio || 1;
 let poly = [], lasso = null, stroke = null, hover = null, lastPt = null, shiftDown = false, lastTap = null;
@@ -307,7 +308,7 @@ function draw(){
   const vc = Math.cos(view.r) * view.s, vn = Math.sin(view.r) * view.s;
   ctx.setTransform(dpr * vc, dpr * vn, -dpr * vn, dpr * vc, dpr * view.ox, dpr * view.oy);
   ctx.drawImage(S.im, 0, 0); if (!hidden) ctx.drawImage(ov, 0, 0);
-  const col = cls >= 50 ? 'rgb(' + COL[cls].join(',') + ')' : (cls === 0 ? '#ff4444' : '#ffffff');
+  const col = COL[cls] ? 'rgb(' + COL[cls].join(',') + ')' : (cls === 0 ? '#ff4444' : '#ffffff');
   ctx.lineWidth = 2 / view.s;
   if (poly.length) {
     ctx.strokeStyle = col; ctx.fillStyle = col; ctx.beginPath(); ctx.moveTo(poly[0].x, poly[0].y);
@@ -323,6 +324,14 @@ function draw(){
     ctx.strokeStyle = '#fff'; ctx.setLineDash([6 / view.s, 4 / view.s]); ctx.lineWidth = 1 / view.s;
     ctx.beginPath(); ctx.moveTo(lastPt.x, lastPt.y); ctx.lineTo(hover.x, hover.y); ctx.stroke(); ctx.setLineDash([]); }
   if (tool === 'brush' && hover) { ctx.strokeStyle = '#fff'; ctx.lineWidth = 1 / view.s; ctx.beginPath(); ctx.arc(hover.x, hover.y, brush, 0, 7); ctx.stroke(); }
+  if (Date.now() < brushPreviewUntil) {                 // while sliding: the brush, at its real size on the photo
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    const R = Math.max(1, brush * view.s), cx = w / 2, cy = h / 2;
+    ctx.globalAlpha = .55; ctx.fillStyle = col; ctx.beginPath(); ctx.arc(cx, cy, R, 0, 7); ctx.fill(); ctx.globalAlpha = 1;
+    ctx.lineWidth = 2; ctx.strokeStyle = '#fff'; ctx.beginPath(); ctx.arc(cx, cy, R, 0, 7); ctx.stroke();
+    ctx.fillStyle = '#fff'; ctx.font = '14px -apple-system, Helvetica, sans-serif'; ctx.textAlign = 'center';
+    ctx.fillText('brush ' + brush + ' px', cx, cy + R + 18);
+  }
 }
 function apply(fn, thr){
   thr = thr || 128;
@@ -570,7 +579,14 @@ function moveGesture(){
 // ---------------------------------------------------------------- toolbar
 function setTool(t){ tool = t; poly = []; lasso = null; stroke = null; document.querySelectorAll('[data-tool]').forEach(b => b.classList.toggle('on', b.dataset.tool === t)); updateCloseBtn(); draw(); }
 function setCls(c){ cls = c; document.querySelectorAll('[data-cls]').forEach(b => b.classList.toggle('on', +b.dataset.cls === c)); draw(); }
-function brushStep(d){ let j = BRUSH_SIZES.indexOf(brush); j = Math.max(0, Math.min(BRUSH_SIZES.length - 1, j + d)); brush = BRUSH_SIZES[j]; $('brushv').textContent = brush; draw(); }
+function setBrushIndex(j, preview){
+  j = Math.max(0, Math.min(BRUSH_SIZES.length - 1, j)); brush = BRUSH_SIZES[j];
+  $('brushv').textContent = brush; $('brushSlider').value = j;
+  try { localStorage.setItem('brush', String(j)); } catch(_) {}
+  if (preview) { brushPreviewUntil = Date.now() + 900; clearTimeout(setBrushIndex.t); setBrushIndex.t = setTimeout(draw, 950); }
+  draw();
+}
+function brushStep(d){ setBrushIndex(BRUSH_SIZES.indexOf(brush) + d, true); }
 function openDrawer(){ renderList(); renderBatchInfo(); $('drawer').classList.add('open'); $('scrim').style.display = 'block'; }
 function closeDrawer(){ $('drawer').classList.remove('open'); $('scrim').style.display = 'none'; stage.focus({preventScroll:true}); }
 
@@ -583,7 +599,8 @@ async function main(){
   document.querySelectorAll('[data-tool]').forEach(b => b.onclick = () => setTool(b.dataset.tool));
   document.querySelectorAll('[data-cls]').forEach(b => b.onclick = () => setCls(+b.dataset.cls));
   $('bStraight').onclick = () => { straight = !straight; $('bStraight').classList.toggle('on', straight); draw(); };
-  $('bBrushMinus').onclick = () => brushStep(-1); $('bBrushPlus').onclick = () => brushStep(1);
+  $('brushSlider').addEventListener('input', e => { if (tool !== 'brush') setTool('brush'); setBrushIndex(+e.target.value, true); });
+  try { const j = localStorage.getItem('brush'); if (j !== null) setBrushIndex(+j, false); } catch(_) {}
   $('bUndo').onclick = undo; $('bFit').onclick = fit;
   $('bReplace').onclick = () => replaceAll(+$('selFrom').value);
   const hide = v => { hidden = v; draw(); };
@@ -611,7 +628,7 @@ async function main(){
   try { fingerDraw = localStorage.getItem('fingerDraw') === '1'; $('chkFinger').checked = fingerDraw; } catch(_) {}
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flushSave(); });
   window.addEventListener('pagehide', () => { flushSave(); });
-  setTool('polygon'); setCls(150);
+  setTool('brush'); setCls(150);
   try { DB = await openDB(); } catch(e) { msg('This browser will not store data (' + e.message + '). Open the app from the Home Screen, not a private tab.', 10000); return; }
   if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
   await refreshList();
